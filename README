@@ -1,0 +1,198 @@
+
+Joseph Howarth - Efficient Directory Searching with Boyer-Moore
+		 Comp 15, Project 2 - Herp de Gerp
+
+Purpose
+```````
+
+Design and Architecture Overview
+``````````````````````
+		My initial approach to the project was similar to many others: 
+	create an index of lines from the inputted files and use a hash table  
+	to store lists of which lines and files containing each word. This 
+	would enable constant time lookup and very quick printing, however the
+	time to process every word in every file and then store the entire 
+	contents of each file line-by-line in ram seemed too inefficient to be
+	practical.
+		I investigated using other data structures, notable binary 
+	search trees and tries, these had the same fundamental limitations
+	of very significant pre-processing and ram requirements >= to the
+	size of the indexed directory. The direct alternative of searching
+	the entire directory each search naively would certainly take too
+	long as well.
+		After researching several alternate methods to achieve more
+	reasonable indexing times and O(1) ram usage (relative to directory
+	size), the boyer-moore algorithm appeared to solve the issue. By 
+	comparing the pattern to hay at the left, if there is a mis-match
+	the algorithm can shift nearly the entire length of the pattern 
+	instead of only by 1 char. This means with a pattern of length 10,
+	hay of length 1000 and a match located at position 500, BM might
+	only have to perform 50-100 comparisons instead of >500. (For more
+	information, see the linked article in acknowledgements)
+
+	Architecture:
+		
+		The search tool built around Boyer-Moore consists of four
+	main parts:
+			A.) main.cpp
+				Orchestrates command loop, arguments,
+				other classes
+			
+			B.) SearchClass
+				Initialized on pattern, contains 
+				pre-processing for BM, BMSearch itself
+				and the master Search() function that
+				orchestrates each search per query cycle
+	
+			C.) File_inf 
+				Class containing data and functions for
+				each file.
+				3 main jobs:
+					
+					1.) Open file to mmap
+					
+					2.) Find and store positions 
+					     of new lines and store 
+					     positions of found matches
+					
+					3.) Print 
+					      Path + line_num + line content
+					    for each match
+			
+			D.) FSTreeTraverse
+				Given a valid directory, creates list of
+				File_inf objects in Files vector
+				set complete Path for each file
+	
+	Intersting Design Choices:
+		
+		In order to reduce overhead due to copying to and from buffers
+		repeatedly, as well as for ease of use with BM, each text file
+		is mmap-ed from disk directly to ram based off its filesize
+		and set to a char*. This means that it can be read just like
+		a c_string without needing to copy data through buffers too
+		many times.
+
+		While designing the project, one of the biggest time sinks 
+		appeared to be file i/o, so I wrote several aspects in such
+		a way to make adding asynchronous io or other concurrency
+		methods easier. Most notably, the file opening process is
+		done by looping through the Files vector, mmap-ing each
+		and placing a pointer to the File_inf object in the
+		the SearchClass's queue to be processed. This means that 
+		the SearchClass will only process opened files, and its loop 
+		could be active in a different thread/processing while 
+		asynchrous io occurs. Unfortunately, due to time constraints
+		I haven't implemented that optimization yet, though I 
+		would like to tinker over the next weeks.
+
+		Interestingly, due to the nature of BM, searching for newline
+		characters actually takes longer than lengthier patters 
+		because it actually has to compare each character. So in
+		order to efficiently calculate the line numbers of matches
+		and print the corresponding lines, the position of
+		new lines (only \n) in the file (ie. the indeces in the 
+		const char[]) are placed into a vector. 
+			From this, because they were found by a forward 
+		pass and so are in order a binary search is performed 
+		on these "known_lines" with the position of a match. This 
+		returns the index of the match, which corresponds to 
+		line number - 1. 
+			To print, a loop is run on the file mmap, printing
+		each char from the returned index - 1 to index. 
+		
+		The case insensitivity was achieved by setting if statments
+		in the BM-preprocessing stage and search stage. In preBM,
+		the offset table was set both for tolower and toupper, 
+		preserving whatever non-alpha char was input, but correctly
+		offsetting both lower and upper case.
+			The BMSearch function with case insensitivity simply
+		uses strncasecmp instead of strncmp. This solution only works
+		definitively on Posix systems, but it can be easily upgraded
+		in the future. The entire function loop was copied because
+		comparing the boolean num_files * char_in_file * ave_comp 
+		results in a large number of checks that can be avoided by
+		only checking once at the beginning. 
+
+		A downside of boyer-moore is that it recognizes patterns, but
+		not words naturally. Looking at the_gerp, it does not count
+		matches followed by punctuation, but does ignore whitespace.
+		To mimick this functionality, each match is checked to see
+		if it is followed and preceded by whitespace (or it is the 
+		first word in a file, nasty corner case!)
+
+
+		Just to reiterate a point again, I did initially consider
+		using hash tables (and briefly ties), however based on 
+		performance, I used the Boyer-Moore approach instead.
+
+Files Provided
+``````````````
+	README -- documentation
+	Makefile -- compiles and provides 
+	DirNode.h -- used in FSTree
+	DirNode.o  
+	File_inf.cpp -- described in architecture, stands for file_info 
+	File_inf.h 
+	FSTree.h -- creates directory tree
+	FSTree.o 
+	FSTreeTraversal.cpp -- traverses directory tree, see architecture
+	FSTreeTraversal.h 
+	main.cpp --ochestrates project, see architecture
+	Search.cpp --updated each query cycle with patter, see architecture
+	Search.h
+
+Compiling and Running
+`````````````````````
+	type make to compile
+
+	to run ./gerp [valid directory]
+
+	o AnyString
+		Searches directory for string
+
+	o "@i AnyString" or "@insensitive AnyString"
+		performs case insensitive search
+
+	o "@q" or "@quit": 
+		These commands will completely quit the program, and print 
+		"Goodbye! Thank you and have a nice day." This statement 
+		should be followed by a new line.
+
+Testing
+```````
+		The FSTreeTraversal was tested through cout statements in 
+	main, various directory names would be passed in and the correct 
+	output would be compared. 
+
+		The Boyer-Moore algorithm was tested originally in its own
+	file with various short strings and patterns. It was then integrated
+	into the SearchClass
+
+		The File_inf and Search classes were tested incrementally,
+	first with only simple opening and closing of files, testing queues
+	etc. Then once preliminary bugs were resolved, the project was tested
+	only printing the location of matches, then matches and known newlines
+	and finally the full print functionallity was added and tested
+		Once this worked, the case insensitive feature was added and
+	tested, followed by whitespace detection (ie if looking for the, there
+	does NOT count).
+		
+
+
+Aknowledgements
+```````````````
+	Information on the Boyer-Moore algorithm from various web sources
+	and Stack Exchange, most notably this page 
+		http://www-igm.univ-mlv.fr/~lecroq/string/node14.html
+	The version of Boyer-Moore implemented currently is 
+	Pratt-Boyer-Moore without the Good-Suffix rule adapted from Jerry
+	Coffins example
+	
+	Extensive use of cplusplus.com looking up how to use new tools
+	such as mmap/munmap, fstat, etc. as well as interfaces for STL
+	classes and miscellaneous extra information
+
+
+
+	
