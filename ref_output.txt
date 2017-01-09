@@ -1,3 +1,0 @@
-Query? super Not Found. Try with @insensitive or @i.
-Query? 
-Goodbye! Thank you and have a nice day.
